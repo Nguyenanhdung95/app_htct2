@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'database_service.dart';
+import 'api_service.dart';
 import 'models.dart';
 
 class AdminPage extends StatefulWidget {
@@ -12,8 +12,8 @@ class AdminPage extends StatefulWidget {
 }
 
 class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
-  final DatabaseService _dbService = DatabaseService();
-  bool _isConnected = false;
+  final ApiService _apiService = ApiService();
+  bool _isConnected = true; // API is always connected
   bool _isLoading = true;
   List<Question> _questions = [];
   late TabController _tabController;
@@ -28,11 +28,7 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
   Future<void> _initializeData() async {
     try {
       print('Initializing AdminPage data...');
-      await _dbService.connect();
-      print('Database connected successfully');
-      setState(() => _isConnected = true);
 
-      await _dbService.checkQuestionsAndAnswers();
       await _loadQuestions();
       print('AdminPage data initialization completed');
     } catch (e) {
@@ -52,7 +48,7 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
   Future<void> _loadQuestions() async {
     try {
       print('Loading questions for admin...');
-      final questions = await _dbService.getQuestions();
+      final questions = await _apiService.getAdminQuestions();
       print('Loaded ${questions.length} questions for admin');
       if (mounted) {
         setState(() => _questions = questions);
@@ -85,7 +81,7 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () async {
-              await _dbService.disconnect();
+              _apiService.logout();
               if (!mounted) return;
               Navigator.of(context).pushReplacementNamed('/login');
             },
@@ -236,7 +232,7 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
 
   Widget _buildAddQuestionTab() {
     return AddQuestionForm(
-      dbService: _dbService,
+      apiService: _apiService,
       onQuestionAdded: _loadQuestions,
     );
   }
@@ -249,17 +245,18 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
           question: question,
           onSave: (updatedQuestion) async {
             try {
-              await _dbService.updateQuestion(
+              // Convert answers to API format
+              final answers = updatedQuestion.answers.map((answer) => {
+                'label': answer.label,
+                'text': answer.text,
+              }).toList();
+
+              await _apiService.updateQuestion(
                 updatedQuestion.id,
                 updatedQuestion.text,
                 updatedQuestion.correctAnswer,
+                answers,
               );
-
-              // Update answers
-              for (int i = 0; i < updatedQuestion.answers.length; i++) {
-                final answer = updatedQuestion.answers[i];
-                await _dbService.updateAnswer(answer.id, answer.text);
-              }
 
               await _loadQuestions();
               if (mounted) {
@@ -296,7 +293,7 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
               onPressed: () async {
                 Navigator.of(context).pop();
                 try {
-                  await _dbService.deleteQuestion(question.id);
+                  await _apiService.deleteQuestion(question.id);
                   await _loadQuestions();
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -322,18 +319,18 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
   @override
   void dispose() {
     _tabController.dispose();
-    _dbService.disconnect();
+    _apiService.logout();
     super.dispose();
   }
 }
 
 class AddQuestionForm extends StatefulWidget {
-  final DatabaseService dbService;
+  final ApiService apiService;
   final VoidCallback onQuestionAdded;
 
   const AddQuestionForm({
     super.key,
-    required this.dbService,
+    required this.apiService,
     required this.onQuestionAdded,
   });
 
@@ -365,26 +362,26 @@ class _AddQuestionFormState extends State<AddQuestionForm> {
     if (!_formKey.currentState!.validate()) return;
 
     try {
-      // Add question
-      await widget.dbService.addQuestion(_questionController.text, _correctAnswer, 1); // Default admin ID
+      // Prepare answers for API
+      const labels = ['A', 'B', 'C', 'D'];
+      final answers = _answerControllers.asMap().entries.map((entry) => {
+        'label': labels[entry.key],
+        'text': entry.value.text,
+      }).toList();
 
-      // Get the inserted question ID
-      final questionId = await widget.dbService.getLastInsertedQuestionId();
+      // Add question via API
+      await widget.apiService.createQuestion(
+        _questionController.text,
+        _correctAnswer,
+        answers,
+      );
 
-      if (questionId != -1) {
-        // Add answers
-        const labels = ['A', 'B', 'C', 'D'];
-        for (int i = 0; i < _answerControllers.length; i++) {
-          await widget.dbService.addAnswer(questionId, labels[i], _answerControllers[i].text);
-        }
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Thêm câu hỏi thành công')),
-          );
-          _clearForm();
-          widget.onQuestionAdded();
-        }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Thêm câu hỏi thành công')),
+        );
+        _clearForm();
+        widget.onQuestionAdded();
       }
     } catch (e) {
       if (mounted) {

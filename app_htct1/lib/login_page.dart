@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'database_service.dart';
+import 'api_service.dart';
 import 'models.dart';
 import 'admin_page.dart';
 
@@ -13,9 +13,9 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _dbService = DatabaseService();
+  final _apiService = ApiService();
   bool _isLoading = false;
-  bool _isConnected = false;
+  bool _isConnected = true; // API is always "connected" for now
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
   User? _currentUser;
@@ -35,25 +35,8 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
   }
 
   Future<void> _connectToDatabase() async {
-    try {
-      await _dbService.connect();
-      setState(() => _isConnected = true);
-      // Check users table structure
-      await _dbService.checkUsersTable();
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Không thể kết nối database: $e'),
-            backgroundColor: Colors.red.shade700,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-          ),
-        );
-      }
-    }
+    // API connection check - for now just set as connected
+    setState(() => _isConnected = true);
   }
 
   Future<void> _login() async {
@@ -94,17 +77,24 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
     setState(() => _isLoading = true);
 
     try {
-      print('Calling authenticate...');
-      final isAuthenticated = await _dbService.authenticate(
+      print('Calling API login...');
+      final loginData = await _apiService.login(
         _usernameController.text,
         _passwordController.text,
       );
-      print('Authentication result: $isAuthenticated');
+      print('Login result: $loginData');
 
-      if (isAuthenticated) {
-        print('Authentication successful, getting user info...');
-        // Get user information
-        _currentUser = await _dbService.getCurrentUser(_usernameController.text);
+      if (loginData['token'] != null) {
+        print('Login successful, parsing user info...');
+        // Parse user information from API response
+        final userData = loginData['user'];
+        _currentUser = User(
+          id: userData['id'],
+          username: userData['username'],
+          password: '', // Not returned from API for security
+          fullName: userData['fullName'],
+          role: userData['role'],
+        );
         print('User info: $_currentUser');
 
         if (mounted && _currentUser != null) {
@@ -365,7 +355,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
     _animationController.dispose();
     _usernameController.dispose();
     _passwordController.dispose();
-    _dbService.disconnect();
+    _apiService.logout();
     super.dispose();
   }
 }

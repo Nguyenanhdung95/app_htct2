@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'database_service.dart';
+import 'api_service.dart';
 import 'models.dart';
 
 class HomePage extends StatefulWidget {
@@ -10,12 +10,11 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
-  final DatabaseService _dbService = DatabaseService();
-  bool _isConnected = false;
+  final ApiService _apiService = ApiService();
+  bool _isConnected = true; // API is always connected for now
   bool _isLoading = true;
   List<Question> _questions = [];
   QuizResult _quizResult = QuizResult(totalQuestions: 0, correctAnswers: 0, wrongAnswers: 0, percentage: 0.0);
-  int _currentUserId = -1;
   late TabController _tabController;
   Map<int, String> _userAnswers = {}; // questionId -> selectedAnswer
 
@@ -29,17 +28,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Future<void> _initializeData() async {
     try {
       print('Initializing HomePage data...');
-      await _dbService.connect();
-      print('Database connected successfully');
-      setState(() => _isConnected = true);
-
-      // Check table data
-      await _dbService.checkQuestionsAndAnswers();
-
-      // Get current user ID (assuming we store username somewhere, for now use a default)
-      // In a real app, you'd pass the username from login
-      _currentUserId = await _dbService.getCurrentUserId('user1'); // Default to user1 for demo
-      print('Current user ID: $_currentUserId');
 
       await _loadQuestions();
       await _loadQuizResult();
@@ -64,21 +52,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Future<void> _loadQuestions() async {
     try {
       print('Loading questions...');
-      print('Database service connection state: ${_dbService.connection?.isOpen ?? false ? "Open" : "Closed"}');
 
-      final questions = await _dbService.getQuestions();
+      final questions = await _apiService.getQuestions();
       print('Loaded ${questions.length} questions');
-
-      if (questions.isEmpty) {
-        print('⚠️ No questions loaded from database');
-        // Try to check if tables exist
-        try {
-          final tableCheck = await _dbService.connection.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'");
-          print('Available tables: ${tableCheck.map((row) => row.toColumnMap()['table_name']).toList()}');
-        } catch (e) {
-          print('Error checking tables: $e');
-        }
-      }
 
       for (var q in questions) {
         print('Question ${q.id}: ${q.text}');
@@ -105,47 +81,20 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _loadQuizResult() async {
-    if (_currentUserId != -1) {
-      try {
-        final userAnswers = await _dbService.getUserAnswers(_currentUserId);
-        final totalQuestions = _questions.length; // Tổng số câu hỏi trong database
-        final correctAnswers = userAnswers.where((answer) => answer.isCorrect).length;
-        final wrongAnswers = totalQuestions - correctAnswers; // Sai = Tổng - Đúng
-        final percentage = totalQuestions > 0 ? (correctAnswers / totalQuestions) * 100 : 0.0;
-
-        final result = QuizResult(
-          totalQuestions: totalQuestions,
-          correctAnswers: correctAnswers,
-          wrongAnswers: wrongAnswers,
-          percentage: percentage,
-        );
-
-        if (mounted) {
-          setState(() => _quizResult = result);
-        }
-      } catch (e) {
-        print('Error loading quiz result: $e');
+    try {
+      final result = await _apiService.getUserResults();
+      if (mounted) {
+        setState(() => _quizResult = result);
       }
+    } catch (e) {
+      print('Error loading quiz result: $e');
     }
   }
 
   Future<void> _loadUserAnswers() async {
-    if (_currentUserId != -1) {
-      try {
-        final userAnswers = await _dbService.getUserAnswers(_currentUserId);
-        if (mounted) {
-          setState(() {
-            _userAnswers = {
-              for (var answer in userAnswers)
-                answer.questionId: answer.chosenAnswer
-            };
-          });
-          print('Loaded ${userAnswers.length} user answers');
-        }
-      } catch (e) {
-        print('Error loading user answers: $e');
-      }
-    }
+    // For now, user answers are handled locally in the UI
+    // In a more complete implementation, we might want to load previous answers from API
+    print('User answers handled locally in UI');
   }
 
   @override
@@ -166,7 +115,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () async {
-              await _dbService.disconnect();
+              _apiService.logout();
               if (!mounted) return;
               Navigator.of(context).pushReplacementNamed('/login');
             },
@@ -271,10 +220,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                   _userAnswers[question.id] = value;
                                 });
 
-                                // Submit answer to database
-                                final isCorrect = value == question.correctAnswer;
+                                // Submit answer to API
                                 try {
-                                  await _dbService.submitAnswer(_currentUserId, question.id, value, isCorrect);
+                                  final isCorrect = await _apiService.submitAnswer(question.id, value);
                                   await _loadQuizResult(); // Refresh results
                                 } catch (e) {
                                   print('Error submitting answer: $e');
@@ -447,7 +395,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   @override
   void dispose() {
     _tabController.dispose();
-    _dbService.disconnect();
+    _apiService.logout();
     super.dispose();
   }
 }

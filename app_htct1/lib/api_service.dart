@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 import 'models.dart';
 
 class ApiService {
-  static const String baseUrl = 'http://10.0.2.2:3000'; // For Android emulator
+  static const String baseUrl = 'https://app-htct2-1.onrender.com'; // SỬ DỤNG URL CỦA BẠN!// For Android emulator
   // static const String baseUrl = 'http://localhost:3000'; // For iOS simulator
   // static const String baseUrl = 'https://your-server-url.com'; // For production
 
